@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="id">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>SakuKu — Pencatatan Keuangan Harian</title>
+  <meta name="description"
+    content="Aplikasi mobile web pencatatan keuangan harian, buku tabungan digital, dan wishlist dengan sinkronisasi Google Sheets dan dukungan offline.">
+  <meta name="theme-color" content="#F4FBF8">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="SakuKu">
+  <link rel="manifest" href="./manifest.json">
+  <link rel="icon" type="image/svg+xml" href="./icon.svg">
+  <link rel="apple-touch-icon" href="./icon.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+
+<body>
+  <div class="app-shell">
+    <!-- Top App Bar (M3 Expressive Edge-to-Edge) -->
+    <header class="top-bar" id="topBar">
+      <div class="brand-mark">
+        <span class="brand-logo" aria-hidden="true">S</span>
+        <h1 class="brand-title">SakuKu</h1>
+      </div>
+
+      <div class="month-picker" aria-label="Pilih Bulan dan Tanggal">
+        <button type="button" class="month-btn md-ripple" id="prevMonthBtn" aria-label="Bulan sebelumnya">‹</button>
+        <button type="button" class="month-label-btn md-ripple" id="monthLabelBtn"
+          aria-label="Buka pemilih tanggal dan bulan">
+          <span id="monthLabel">Nov 2026</span>
+          <span class="month-caret" aria-hidden="true">▾</span>
+        </button>
+        <button type="button" class="month-btn md-ripple" id="nextMonthBtn" aria-label="Bulan berikutnya">›</button>
+      </div>
+
+      <div class="top-actions">
+        <button type="button" class="sync-pill md-ripple" id="syncPill" title="Pengaturan & Sinkronisasi Cloud">
+          <span class="sync-dot"></span>
+          <span id="syncPillText">Lokal</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Views (Swipeable) -->
+    <main class="main-content" id="mainContent">
+      <!-- View 1: Ringkasan -->
+      <section class="view active" id="view-home" aria-label="Ringkasan Keuangan">
+        <div id="homeContainer"></div>
+      </section>
+
+      <!-- View 2: Transaksi -->
+      <section class="view" id="view-transactions" aria-label="Daftar Transaksi">
+        <div class="tx-toolbar">
+          <div class="search-row">
+            <div class="search-box">
+              <span class="search-icon" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+                  stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="11" cy="11" r="7"></circle>
+                  <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                </svg>
+              </span>
+              <input type="search" id="txSearchInput" class="search-input"
+                placeholder="Cari kategori, catatan, metode...">
+            </div>
+            <button type="button" class="icon-tonal-btn md-ripple" id="txExportPdfBtn" title="Ekspor Laporan PDF"
+              aria-label="Ekspor Laporan PDF">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1"
+                stroke-linecap="round" stroke-linejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                <polyline points="14 2 14 8 20 8"></polyline>
+                <line x1="12" y1="18" x2="12" y2="12"></line>
+                <polyline points="9 15 12 18 15 15"></polyline>
+              </svg>
+            </button>
+          </div>
+          <div class="chip-row" id="txFilterChips">
+            <button type="button" class="chip md-ripple active" data-filter="all">Semua</button>
+            <button type="button" class="chip md-ripple" data-filter="expense">Pengeluaran</button>
+            <button type="button" class="chip md-ripple" data-filter="income">Pemasukan</button>
+          </div>
+        </div>
+        <div id="txListContainer"></div>
+      </section>
+
+      <!-- View 3: Analitik -->
+      <section class="view" id="view-analytics" aria-label="Analitik Keuangan">
+        <div class="analytics-toolbar">
+          <h2 class="section-title">Ringkasan Analitik</h2>
+          <button type="button" class="section-link md-ripple" id="analyticsExportPdfBtn">📄 Unduh PDF</button>
+        </div>
+
+        <div class="stat-grid" id="analyticsStats"></div>
+
+        <div class="analytics-grid">
+          <!-- Kalender Transaksi Interaktif -->
+          <div class="card" id="analyticsCalendarCard">
+            <div class="cal-header-row">
+              <div>
+                <h2 class="chart-card-title" style="margin-bottom:2px;">Kalender Transaksi</h2>
+                <p class="chart-card-sub" style="margin:0;">Ketuk tanggal untuk melihat rincian harian</p>
+              </div>
+              <div class="cal-legend">
+                <span><span class="cal-legend-dot" style="background:var(--income);"></span>Masuk</span>
+                <span><span class="cal-legend-dot" style="background:var(--expense);"></span>Keluar</span>
+              </div>
+            </div>
+            <div id="analyticsCalendarBox"></div>
+          </div>
+
+          <div class="card" id="analyticsDonutCard">
+            <h2 class="chart-card-title">Proporsi Pengeluaran</h2>
+            <p class="chart-card-sub">Ketuk bagian diagram atau kategori untuk melihat detail</p>
+            <div id="donutChartBox"></div>
+          </div>
+
+          <div class="card analytics-span-full" id="analyticsBarCard">
+            <h2 class="chart-card-title">Arus Kas 6 Bulan Terakhir</h2>
+            <p class="chart-card-sub">Ketuk batang diagram untuk melihat ringkasan</p>
+            <div id="barChartBox"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- View 4: Tabungan -->
+      <section class="view" id="view-savings" aria-label="Buku Tabungan Digital">
+        <div id="savingsContainer"></div>
+      </section>
+
+      <!-- View 5: Wishlist -->
+      <section class="view" id="view-wishlist" aria-label="Daftar Wishlist">
+        <div class="chip-row" id="wishFilterChips">
+          <button type="button" class="chip md-ripple active" data-filter="pending">Menunggu</button>
+          <button type="button" class="chip md-ripple" data-filter="achieved">Tercapai</button>
+        </div>
+        <div id="wishlistContainer"></div>
+      </section>
+    </main>
+
+    <!-- M3 Expressive Floating Action Button -->
+    <button type="button" class="fab md-ripple" id="fabBtn" aria-label="Tambah Data Baru">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+        stroke-linecap="round">
+        <line x1="12" y1="5" x2="12" y2="19"></line>
+        <line x1="5" y1="12" x2="19" y2="12"></line>
+      </svg>
+    </button>
+
+    <!-- Edge-to-Edge Material 3 Navigation Bar -->
+    <nav class="bottom-nav" aria-label="Navigasi Utama">
+      <button type="button" class="nav-item md-ripple active" data-tab="home">
+        <span class="nav-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M3 10.5L12 3l9 7.5V20a1 1 0 0 1-1 1h-5.5v-6.5h-5V21H4a1 1 0 0 1-1-1v-9.5z" />
+          </svg>
+        </span>
+        <span>Ringkasan</span>
+      </button>
+      <button type="button" class="nav-item md-ripple" data-tab="transactions">
+        <span class="nav-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6" />
+            <line x1="8" y1="12" x2="21" y2="12" />
+            <line x1="8" y1="18" x2="21" y2="18" />
+            <circle cx="4" cy="6" r="1" />
+            <circle cx="4" cy="12" r="1" />
+            <circle cx="4" cy="18" r="1" />
+          </svg>
+        </span>
+        <span>Transaksi</span>
+      </button>
+      <button type="button" class="nav-item md-ripple" data-tab="analytics">
+        <span class="nav-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M21.21 15.89A10 10 0 1 1 8 2.83" />
+            <path d="M22 12A10 10 0 0 0 12 2v10z" />
+          </svg>
+        </span>
+        <span>Analitik</span>
+      </button>
+      <button type="button" class="nav-item md-ripple" data-tab="savings">
+        <span class="nav-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+        </span>
+        <span>Tabungan</span>
+      </button>
+      <button type="button" class="nav-item md-ripple" data-tab="wishlist">
+        <span class="nav-pill">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round"
+            stroke-linejoin="round">
+            <polygon
+              points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+          </svg>
+        </span>
+        <span>Wishlist</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- M3 Modal Bottom Sheet -->
+  <div class="modal-backdrop" id="modalBackdrop" role="dialog" aria-modal="true">
+    <div class="sheet" id="modalSheet"></div>
+  </div>
+
+  <!-- M3 Snackbar Notification -->
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="./charts.js"></script>
+  <script src="./sync.js"></script>
+  <script src="./app.js"></script>
+</body>
+
+</html>

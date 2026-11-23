@@ -1,0 +1,20 @@
+{
+  "name": "SakuKu — Pencatatan Keuangan Harian",
+  "short_name": "SakuKu",
+  "description": "Aplikasi pencatatan keuangan harian, buku tabungan digital, dan wishlist dengan sinkronisasi Google Sheets & mode offline.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
+  "orientation": "portrait",
+  "background_color": "#F4FBF8",
+  "theme_color": "#F4FBF8",
+  "lang": "id",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
