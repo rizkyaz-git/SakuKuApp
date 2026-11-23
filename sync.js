@@ -454,7 +454,7 @@ const ExchangeService = {
           updatedAt: new Date().toISOString(),
           source: 'live'
         };
-        Store.save();
+        Store.save({ type: 'rates-updated' });
         this.isFetching = false;
         return { ok: true, rates: Store.state.settings.exchangeRates };
       }
@@ -663,21 +663,23 @@ const Store = {
     return this.state;
   },
 
-  save() {
+  save(options = {}) {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(this.state));
     } catch (e) {
       console.error('Gagal menyimpan ke localStorage:', e);
     }
-    this.notify();
+    if (!options.silent) {
+      this.notify({ type: options.type || 'data-change' });
+    }
   },
 
   subscribe(fn) {
     this.listeners.push(fn);
   },
 
-  notify() {
-    this.listeners.forEach((fn) => fn(this.state));
+  notify(meta = { type: 'data-change' }) {
+    this.listeners.forEach((fn) => fn(this.state, meta));
   },
 
   getPendingCount() {
@@ -707,7 +709,7 @@ const Store = {
     }
 
     this.isSyncing = true;
-    this.notify();
+    this.notify({ type: 'sync-status' });
 
     const payload = {
       transactions: this.state.transactions.filter((x) => x.syncStatus === 'pending'),
@@ -738,23 +740,35 @@ const Store = {
         throw new Error((result && result.error) || 'Respons server tidak valid');
       }
 
-      this.mergeServerData(result.data);
+      const hasDataChanges = this.mergeServerData(result.data);
       this.state.settings.lastSyncAt = result.serverTime || new Date().toISOString();
-      this.save();
-
       this.isSyncing = false;
-      this.notify();
-      return { ok: true };
+      this.save({ silent: true });
+      this.notify({ type: 'sync-complete', hasDataChanges });
+      return { ok: true, hasDataChanges };
     } catch (err) {
       this.isSyncing = false;
-      this.notify();
+      this.notify({ type: 'sync-status' });
       if (!silent) console.error('Sync gagal:', err);
       return { ok: false, error: err.message || 'Gagal terhubung ke Google Sheets' };
     }
   },
 
+  isSameRecord(a, b) {
+    if (!a || !b) return false;
+    const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+    keys.delete('syncStatus');
+    for (const k of keys) {
+      const va = a[k] == null ? '' : String(a[k]);
+      const vb = b[k] == null ? '' : String(b[k]);
+      if (va !== vb) return false;
+    }
+    return true;
+  },
+
   mergeServerData(serverData) {
-    if (!serverData) return;
+    if (!serverData) return false;
+    let hasChanges = false;
 
     const mergeList = (localArr, remoteArr) => {
       const map = new Map();
@@ -763,7 +777,13 @@ const Store = {
       });
       (remoteArr || []).forEach((rItem) => {
         const existing = map.get(rItem.id);
-        if (!existing || String(rItem.updatedAt || '') >= String(existing.updatedAt || '')) {
+        if (!existing) {
+          hasChanges = true;
+          map.set(rItem.id, Object.assign({}, rItem, { syncStatus: 'synced' }));
+        } else if (String(rItem.updatedAt || '') >= String(existing.updatedAt || '')) {
+          if (!this.isSameRecord(existing, rItem)) {
+            hasChanges = true;
+          }
           map.set(rItem.id, Object.assign({}, rItem, { syncStatus: 'synced' }));
         }
       });
@@ -774,5 +794,6 @@ const Store = {
     this.state.savingsBooks = mergeList(this.state.savingsBooks, serverData.savingsBooks);
     this.state.savingsLedger = mergeList(this.state.savingsLedger, serverData.savingsLedger);
     this.state.wishlist = mergeList(this.state.wishlist, serverData.wishlist);
+    return hasChanges;
   }
 };

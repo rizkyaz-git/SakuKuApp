@@ -439,6 +439,12 @@ button {
   100% { opacity: 1; transform: scale(1); }
 }
 
+/* Disable entrance animations during silent background sync updates */
+.no-anim .stagger-item,
+.no-anim .amount-pop {
+  animation: none !important;
+}
+
 /* ==========================================================================
    Skeleton Loading Screen (M3 Shimmer)
    ========================================================================== */
@@ -1845,19 +1851,37 @@ textarea.form-control {
   to { transform: translateY(0); opacity: 1; }
 }
 
+.sheet.is-dragging {
+  animation: none !important;
+  transition: none !important;
+}
+
 .sheet-drag-zone {
-  padding: 4px 0 12px;
+  padding: 8px 0 12px;
   cursor: grab;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sheet-drag-zone:active {
+  cursor: grabbing;
 }
 
 .sheet-handle {
-  width: 36px;
+  width: 40px;
   height: 4px;
   border-radius: var(--shape-full);
   background: var(--md-sys-color-outline);
-  opacity: 0.45;
+  opacity: 0.55;
   margin: 0 auto;
+  transition: opacity 0.15s ease, width 0.15s ease;
+}
+
+.sheet-drag-zone:active .sheet-handle,
+.sheet.is-dragging .sheet-handle {
+  opacity: 0.85;
+  width: 48px;
 }
 
 .sheet-header {
@@ -1865,6 +1889,14 @@ textarea.form-control {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: grab;
+}
+
+.sheet-header:active {
+  cursor: grabbing;
 }
 
 .sheet-title {
@@ -1883,7 +1915,25 @@ textarea.form-control {
   display: grid;
   place-items: center;
   font-size: 20px;
+  cursor: pointer;
   transition: transform 0.2s var(--motion-spring);
+}
+
+.sync-action-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.action-timestamp {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+  text-align: center;
+  line-height: 1.25;
+  min-height: 14px;
 }
 
 .close-btn:active {

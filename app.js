@@ -56,8 +56,29 @@ const App = {
     this.setupSwipeNavigation();
     this.setupScrollElevation();
     this.bindEvents();
-    Store.subscribe(() => {
-      if (!this.isBooting) this.render();
+    Store.subscribe((state, meta) => {
+      if (this.isBooting) return;
+      if (meta && meta.type === 'sync-status') {
+        this.updateSyncPill();
+        this.refreshSettingsModalInPlace();
+        return;
+      }
+      if (meta && meta.type === 'sync-complete') {
+        this.updateSyncPill();
+        this.refreshSettingsModalInPlace();
+        if (meta.hasDataChanges) {
+          this.render({ silent: true });
+        }
+        return;
+      }
+      if (meta && meta.type === 'rates-updated') {
+        this.refreshSettingsModalInPlace();
+        if (CurrencyFormat.getDisplayCurrency() !== 'IDR') {
+          this.render({ silent: true });
+        }
+        return;
+      }
+      this.render();
     });
 
     // Tampilkan Skeleton Screen singkat saat inisialisasi agar transisi terasa hidup
@@ -68,15 +89,12 @@ const App = {
     }, 260);
 
     // Ambil kurs real-time di latar belakang (semi-online)
-    ExchangeService.fetchLiveRates(false).then((res) => {
-      if (res && res.ok && !res.cached) {
-        this.render();
-      }
-    });
+    ExchangeService.fetchLiveRates(false);
 
     // Auto-sync & refresh kurs saat kembali online
     window.addEventListener('online', () => {
       this.updateSyncPill();
+      this.refreshSettingsModalInPlace();
       ExchangeService.fetchLiveRates(false);
       if (Store.canSync()) {
         this.showToast('Kembali online — menyinkronkan ke cloud...');
@@ -88,6 +106,7 @@ const App = {
 
     window.addEventListener('offline', () => {
       this.updateSyncPill();
+      this.refreshSettingsModalInPlace();
       this.showToast('Mode Offline — data tersimpan aman di perangkat');
     });
 
@@ -318,9 +337,8 @@ const App = {
       this.openDatePickerModal();
     });
 
-    // PDF Export quick buttons
+    // PDF Export quick button
     document.getElementById('txExportPdfBtn').addEventListener('click', () => this.openPdfExportModal());
-    document.getElementById('analyticsExportPdfBtn').addEventListener('click', () => this.openPdfExportModal());
 
     // FAB
     document.getElementById('fabBtn').addEventListener('click', () => {
@@ -390,7 +408,12 @@ const App = {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   },
 
-  render() {
+  render(options = {}) {
+    const main = document.getElementById('mainContent');
+    if (main) {
+      main.classList.toggle('no-anim', Boolean(options.silent));
+    }
+
     document.getElementById('monthLabel').textContent =
       `${MONTH_SHORT[this.selectedMonth]} ${this.selectedYear}`;
 
@@ -894,13 +917,16 @@ const App = {
   openModal(title, bodyHtml) {
     const backdrop = document.getElementById('modalBackdrop');
     const sheet = document.getElementById('modalSheet');
+    sheet.classList.remove('is-dragging');
     sheet.style.transform = '';
     sheet.style.transition = '';
+    sheet.style.animation = '';
+    backdrop.style.background = '';
     sheet.innerHTML = `
       <div class="sheet-drag-zone" id="sheetDragZone">
         <div class="sheet-handle"></div>
       </div>
-      <div class="sheet-header">
+      <div class="sheet-header" id="sheetHeader">
         <h3 class="sheet-title">${escapeHtml(title)}</h3>
         <button type="button" class="close-btn md-ripple" id="closeModalBtn" aria-label="Tutup">×</button>
       </div>
@@ -909,36 +935,93 @@ const App = {
     backdrop.classList.add('open');
     document.getElementById('closeModalBtn').addEventListener('click', () => this.closeModal());
 
-    // Gestur swipe-to-dismiss pada drag handle
-    const dragZone = document.getElementById('sheetDragZone');
+    // Gestur geser (swipe/drag) pada bar atas bottom sheet (mendukung sentuh & mouse/trackpad)
+    const dragTargets = [
+      document.getElementById('sheetDragZone'),
+      document.getElementById('sheetHeader')
+    ].filter(Boolean);
+
+    let isDragging = false;
+    let activePointerId = null;
     let startY = 0;
-    let deltaY = 0;
+    let startTime = 0;
+    let currentDeltaY = 0;
 
-    dragZone.addEventListener('touchstart', (e) => {
-      startY = e.touches[0].clientY;
-      deltaY = 0;
+    const onPointerDown = (e) => {
+      if (e.target.closest('#closeModalBtn')) return;
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      isDragging = true;
+      activePointerId = e.pointerId;
+      startY = e.clientY;
+      startTime = Date.now();
+      currentDeltaY = 0;
+      sheet.classList.add('is-dragging');
+      sheet.style.animation = 'none';
       sheet.style.transition = 'none';
-    }, { passive: true });
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch (err) { }
+    };
 
-    dragZone.addEventListener('touchmove', (e) => {
-      deltaY = Math.max(0, e.touches[0].clientY - startY);
-      sheet.style.transform = `translateY(${deltaY}px)`;
-    }, { passive: true });
-
-    dragZone.addEventListener('touchend', () => {
-      sheet.style.transition = 'transform 0.26s cubic-bezier(0.34, 1.32, 0.64, 1)';
-      if (deltaY > 75) {
-        this.closeModal();
+    const onPointerMove = (e) => {
+      if (!isDragging || e.pointerId !== activePointerId) return;
+      const rawDelta = e.clientY - startY;
+      if (rawDelta >= 0) {
+        currentDeltaY = rawDelta;
+        sheet.style.transform = `translateY(${rawDelta}px)`;
+        const progress = Math.min(1, rawDelta / 280);
+        backdrop.style.background = `rgba(0, 0, 0, ${(0.48 * (1 - progress * 0.65)).toFixed(3)})`;
       } else {
-        sheet.style.transform = 'translateY(0)';
+        // Efek elastis lembut saat digeser ke atas
+        currentDeltaY = rawDelta;
+        const resist = Math.max(-24, rawDelta * 0.18);
+        sheet.style.transform = `translateY(${resist}px)`;
       }
+    };
+
+    const finishDrag = (e) => {
+      if (!isDragging || e.pointerId !== activePointerId) return;
+      isDragging = false;
+      activePointerId = null;
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch (err) { }
+
+      sheet.classList.remove('is-dragging');
+      const elapsed = Math.max(1, Date.now() - startTime);
+      const velocity = currentDeltaY / elapsed; // px per ms
+      const shouldClose = currentDeltaY > 85 || (currentDeltaY > 36 && velocity > 0.45);
+
+      if (shouldClose) {
+        sheet.style.transition = 'transform 0.22s ease-out';
+        sheet.style.transform = 'translateY(100%)';
+        backdrop.style.background = 'rgba(0, 0, 0, 0)';
+        setTimeout(() => this.closeModal(), 200);
+      } else {
+        sheet.style.transition = 'transform 0.26s cubic-bezier(0.34, 1.32, 0.64, 1)';
+        sheet.style.transform = 'translateY(0)';
+        backdrop.style.background = '';
+      }
+    };
+
+    dragTargets.forEach((el) => {
+      el.addEventListener('pointerdown', onPointerDown);
+      el.addEventListener('pointermove', onPointerMove);
+      el.addEventListener('pointerup', finishDrag);
+      el.addEventListener('pointercancel', finishDrag);
     });
   },
 
   closeModal() {
     const backdrop = document.getElementById('modalBackdrop');
     const sheet = document.getElementById('modalSheet');
+    sheet.classList.remove('is-dragging');
     sheet.style.transform = '';
+    sheet.style.transition = '';
+    sheet.style.animation = '';
+    backdrop.style.background = '';
     backdrop.classList.remove('open');
   },
 
@@ -1783,8 +1866,8 @@ const App = {
           <span>Sertakan ringkasan saldo Buku Tabungan</span>
         </label>
 
-        <button type="submit" class="btn btn-primary btn-full md-ripple">Buat & Cetak Laporan PDF</button>
-        <p class="helper-text" style="text-align:center;">Laporan diformat semi-formal ukuran A4. Pilih "Simpan sebagai PDF" pada dialog cetak.</p>
+        <button type="submit" class="btn btn-primary btn-full md-ripple">Cetak PDF</button>
+        <p class="helper-text" style="text-align:center;">Pilih "Cetak PDF" untuk generate & cetak.</p>
       </form>
     `;
 
@@ -2173,38 +2256,90 @@ const App = {
   /* ========================================================================
      MODAL: PENGATURAN, MONET OTOMATIS, KURS REAL-TIME & CLOUD SYNC
      ======================================================================== */
+  formatDateTimeShort(isoStr) {
+    if (!isoStr) return '-';
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return '-';
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${dd}/${mm}/${yyyy} ${hh}:${min}`;
+  },
+
+  refreshSettingsModalInPlace() {
+    const root = document.getElementById('settingsModalRoot');
+    if (!root) return;
+    const s = Store.state.settings;
+    const pending = Store.getPendingCount();
+    const rates = CurrencyFormat.getRates();
+
+    const netEl = root.querySelector('#settingsNetStatus');
+    if (netEl) {
+      netEl.textContent = navigator.onLine ? 'Online' : 'Offline';
+      netEl.style.color = navigator.onLine ? 'var(--income)' : 'var(--expense)';
+    }
+
+    const pendingEl = root.querySelector('#settingsPendingCount');
+    if (pendingEl) pendingEl.textContent = `${pending} perubahan`;
+
+    const lastSyncKv = root.querySelector('#settingsLastSyncKv');
+    if (lastSyncKv) {
+      lastSyncKv.textContent = s.lastSyncAt
+        ? new Date(s.lastSyncAt).toLocaleString('id-ID')
+        : 'Belum pernah';
+    }
+
+    const ratesKv = root.querySelector('#settingsRatesKv');
+    if (ratesKv) {
+      ratesKv.innerHTML = `1 USD = Rp ${Math.round(rates.USD).toLocaleString('id-ID')} <br> 1 SAR = Rp ${Math.round(rates.SAR).toLocaleString('id-ID')}`;
+    }
+
+    const lastSyncTime = root.querySelector('#settingsLastSyncTime');
+    if (lastSyncTime) lastSyncTime.textContent = this.formatDateTimeShort(s.lastSyncAt);
+
+    const rateUpdatedTime = root.querySelector('#settingsRateUpdatedTime');
+    if (rateUpdatedTime) rateUpdatedTime.textContent = this.formatDateTimeShort(rates.updatedAt);
+
+    const themeMode = s.themeMode || 'system';
+    root.querySelectorAll('#themeModeSeg .seg-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.mode === themeMode);
+    });
+  },
+
   openSettingsModal() {
     const s = Store.state.settings;
     const pending = Store.getPendingCount();
     const lastSyncText = s.lastSyncAt
       ? new Date(s.lastSyncAt).toLocaleString('id-ID')
       : 'Belum pernah';
+    const lastSyncShort = this.formatDateTimeShort(s.lastSyncAt);
     const rates = CurrencyFormat.getRates();
-    const rateUpdated = rates.updatedAt
-      ? new Date(rates.updatedAt).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })
-      : 'Kurs Bawaan';
+    const rateUpdatedShort = this.formatDateTimeShort(rates.updatedAt);
     const themeMode = s.themeMode || 'system';
     const monetStatus = this.monetInfo && this.monetInfo.source === 'device'
       ? 'Aktif (Mengikuti Aksen Perangkat)'
       : 'Aktif (Adaptif Tema Perangkat)';
 
     const html = `
+      <div id="settingsModalRoot">
       <div class="detail-kv-list">
         <div class="detail-kv">
           <span class="detail-kv-label">Status Jaringan</span>
-          <span class="detail-kv-val" style="color:${navigator.onLine ? 'var(--income)' : 'var(--expense)'};">${navigator.onLine ? 'Online' : 'Offline'}</span>
+          <span class="detail-kv-val" id="settingsNetStatus" style="color:${navigator.onLine ? 'var(--income)' : 'var(--expense)'};">${navigator.onLine ? 'Online' : 'Offline'}</span>
         </div>
         <div class="detail-kv">
           <span class="detail-kv-label">Antrean Cloud</span>
-          <span class="detail-kv-val num">${pending} perubahan</span>
+          <span class="detail-kv-val num" id="settingsPendingCount">${pending} perubahan</span>
         </div>
         <div class="detail-kv">
           <span class="detail-kv-label">Sync Terakhir</span>
-          <span class="detail-kv-val">${escapeHtml(lastSyncText)}</span>
+          <span class="detail-kv-val" id="settingsLastSyncKv">${escapeHtml(lastSyncText)}</span>
         </div>
         <div class="detail-kv">
           <span class="detail-kv-label">Kurs Real-Time</span>
-          <span class="detail-kv-val num">1 USD = Rp ${Math.round(rates.USD).toLocaleString('id-ID')} · 1 SAR = Rp ${Math.round(rates.SAR).toLocaleString('id-ID')}</span>
+          <span class="detail-kv-val num" id="settingsRatesKv">1 USD = Rp ${Math.round(rates.USD).toLocaleString('id-ID')} <br> 1 SAR = Rp ${Math.round(rates.SAR).toLocaleString('id-ID')}</span>
         </div>
       </div>
 
@@ -2219,11 +2354,16 @@ const App = {
         </div>
       `}
 
-      <div class="row-2" style="margin-bottom:14px;">
-        <button type="button" class="btn btn-primary btn-sm md-ripple" id="saveAndSyncBtn">Sinkronkan Cloud</button>
-        <button type="button" class="btn btn-tonal btn-sm md-ripple" id="refreshRatesBtn">Perbarui Kurs</button>
+      <div class="row-2" style="margin-bottom:14px;align-items:start;">
+        <div class="sync-action-col">
+          <button type="button" class="btn btn-primary btn-sm btn-full md-ripple" id="saveAndSyncBtn">Sinkronkan Cloud</button>
+          <div class="action-timestamp num" id="settingsLastSyncTime">${escapeHtml(lastSyncShort)}</div>
+        </div>
+        <div class="sync-action-col">
+          <button type="button" class="btn btn-tonal btn-sm btn-full md-ripple" id="refreshRatesBtn">Perbarui Kurs</button>
+          <div class="action-timestamp num" id="settingsRateUpdatedTime">${escapeHtml(rateUpdatedShort)}</div>
+        </div>
       </div>
-      <div class="helper-text" style="margin:-8px 0 14px;text-align:right;">Pembaruan kurs: ${escapeHtml(rateUpdated)}</div>
 
       <div class="form-group" style="border-top:1px solid var(--md-sys-color-outline-variant);padding-top:12px;">
         <label class="form-label">Tema Aplikasi</label>
@@ -2242,6 +2382,7 @@ const App = {
           <button type="button" class="btn btn-secondary btn-sm md-ripple" id="exportJsonBtn">Backup JSON</button>
         </div>
       </div>
+      </div>
     `;
 
     this.openModal('Pengaturan & Cloud Sync', html);
@@ -2251,9 +2392,9 @@ const App = {
     sheet.querySelectorAll('#themeModeSeg .seg-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         Store.state.settings.themeMode = btn.dataset.mode;
-        Store.save();
+        Store.save({ silent: true });
         this.applyTheme();
-        this.openSettingsModal();
+        this.refreshSettingsModalInPlace();
       });
     });
 
@@ -2266,7 +2407,7 @@ const App = {
       const res = await ExchangeService.fetchLiveRates(true);
       if (res.ok) {
         this.showToast(`Kurs diperbarui: 1 USD = Rp ${Math.round(res.rates.USD).toLocaleString('id-ID')}`);
-        this.openSettingsModal();
+        this.refreshSettingsModalInPlace();
       } else {
         this.showToast('Gagal mengambil kurs — memakai kurs cache');
       }
@@ -2276,7 +2417,8 @@ const App = {
       const urlInput = sheet.querySelector('#gasUrlInput');
       if (urlInput) {
         Store.state.settings.gasUrl = urlInput.value.trim();
-        Store.save();
+        Store.save({ silent: true });
+        this.updateSyncPill();
       }
 
       if (!navigator.onLine) {
@@ -2293,7 +2435,7 @@ const App = {
       const res = await Store.syncNow();
       if (res.ok) {
         this.showToast('Berhasil sinkronisasi dengan Google Sheets!');
-        this.openSettingsModal();
+        this.refreshSettingsModalInPlace();
       } else {
         this.showToast('Gagal sync: ' + (res.error || 'Periksa URL & izin Web App'));
       }
